@@ -986,7 +986,7 @@ async function main() {
   });
 
   const buffer = await Packer.toBuffer(doc);
-  const outPath = path.join(__dirname, "..", "QB-Engineer-Master-Specification.docx");
+  const outPath = path.join(__dirname, "QB-Engineer-Master-Specification.docx");
   fs.writeFileSync(outPath, buffer);
   console.log(`Generated: ${outPath}`);
   console.log(`Size: ${(buffer.length / 1024).toFixed(1)} KB`);
