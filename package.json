@@ -1,0 +1,27 @@
+{
+  "name": "qb-engineer-wrapper",
+  "version": "1.0.0",
+  "description": "**Open source manufacturing operations platform — the operational layer that sits alongside your accounting system.**",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danielhokanson/qb-engineer-wrapper.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/danielhokanson/qb-engineer-wrapper/issues"
+  },
+  "homepage": "https://github.com/danielhokanson/qb-engineer-wrapper#readme",
+  "devDependencies": {
+    "docx": "^9.6.0"
+  }
+}
