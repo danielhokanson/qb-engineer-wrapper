@@ -23,6 +23,7 @@ yarn-error.log*
 # ─── Environment & secrets ───
 .env
 *.local
+appsettings.Secrets.json
 
 # ─── Docker ───
 docker-compose.override.yml
