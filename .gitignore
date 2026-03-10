@@ -39,3 +39,11 @@ Thumbs.db
 
 # ─── UI Mockups (local design artifacts) ───
 /mockups/
+
+
+# ─── Legacy databases ───
+*.accdb
+*.laccdb
+
+# ─── Claude Code ───
+.claude/
