@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-angular:
+    name: Build Angular
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qb-engineer-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: qb-engineer-ui/package-lock.json
+      - run: npm ci
+      - run: npx ng build --configuration=production
+
+  build-dotnet:
+    name: Build .NET
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qb-engineer-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - run: dotnet restore qb-engineer.api/qb-engineer.api.csproj
+      - run: dotnet build qb-engineer.api/qb-engineer.api.csproj -c Release --no-restore
+
+  test-angular:
+    name: Test Angular
+    needs: build-angular
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qb-engineer-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: qb-engineer-ui/package-lock.json
+      - run: npm ci
+      - run: npx vitest run
+
+  test-dotnet:
+    name: Test .NET
+    needs: build-dotnet
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qb-engineer-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - run: dotnet restore
+      - run: dotnet test -c Release --verbosity normal
+
+  docker:
+    name: Docker Build
+    needs: [test-angular, test-dotnet]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build UI image
+        run: docker build -t qb-engineer-ui:${{ github.sha }} ./qb-engineer-ui
+      - name: Build API image
+        run: docker build -t qb-engineer-api:${{ github.sha }} -f qb-engineer-server/qb-engineer.api/Dockerfile ./qb-engineer-server
