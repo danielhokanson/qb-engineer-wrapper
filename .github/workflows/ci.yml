@@ -80,3 +80,6 @@ jobs:
         run: docker build -t qb-engineer-ui:${{ github.sha }} ./qb-engineer-ui
       - name: Build API image
         run: docker build -t qb-engineer-api:${{ github.sha }} -f qb-engineer-server/qb-engineer.api/Dockerfile ./qb-engineer-server
+
+  # E2E tests (Cypress + axe-core accessibility) run against full Docker Compose stack
+  # Triggered manually or in staging/release workflows
