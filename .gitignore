@@ -48,3 +48,12 @@ Thumbs.db
 
 # ─── Claude Code ───
 .claude/
+
+# ─── Debug & investigation artifacts (root-level scratch files) ───
+/test-results/
+/*.py
+/*.yaml
+/*.yml
+/*.pdf
+/*.txt
+/*.json
