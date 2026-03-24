@@ -57,3 +57,17 @@ Thumbs.db
 /*.pdf
 /*.txt
 /*.jsonupdate_video_content.sql
+auth_resp.json
+extract_result.json
+extract_result.txt
+login.json
+setup.json
+template_check.json
+w4_extract.json
+w4_extract2.json
+w4_extract3.json
+w4_extract4.json
+w4_extract5.json
+w4_raw.json
+w4_text_audit.txt
+response.txt
