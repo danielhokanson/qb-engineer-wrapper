@@ -56,7 +56,8 @@ Thumbs.db
 /*.yml
 /*.pdf
 /*.txt
-/*.jsonupdate_video_content.sql
+/*.json
+update_video_content.sql
 auth_resp.json
 extract_result.json
 extract_result.txt
