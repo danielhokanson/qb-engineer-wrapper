@@ -1,5 +1,10 @@
 # ─── Angular / Node ───
 **/dist/
+# Keep the tools/dist directory so Docker can volume-mount it; binaries are not committed
+!tools/dist/
+!tools/dist/.gitkeep
+tools/dist/*.exe
+tools/rfid-relay/publish/
 **/out-tsc/
 **/tmp/
 **/coverage/
