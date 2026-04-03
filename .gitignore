@@ -42,6 +42,7 @@ docker-compose.override.yml
 # ─── OS ───
 .DS_Store
 Thumbs.db
+nul
 
 # ─── UI Mockups (local design artifacts) ───
 /mockups/
