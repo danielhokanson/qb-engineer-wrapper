@@ -490,20 +490,17 @@ echo ""
 
 if $HEALTHY; then
     ok "API is healthy and accepting requests"
-
-    # Safety: reset RECREATE_DB so the database isn't wiped on every restart
-    if $FRESH; then
-        set_env "RECREATE_DB" "false"
-        ok "Reset RECREATE_DB=false (database has been wiped, won't repeat on next start)"
-    fi
 else
     warn "API health check timed out after ${MAX_WAIT}s"
     warn "This can be normal on Pi — migrations are slow. Check:"
     warn "  docker compose logs -f qb-engineer-api"
-    if $FRESH; then
-        warn "IMPORTANT: RECREATE_DB is still 'true' in .env"
-        warn "Once the API is healthy, run:  sed -i 's/RECREATE_DB=true/RECREATE_DB=false/' .env"
-    fi
+fi
+
+# Safety: always reset RECREATE_DB after the container has started —
+# it already read the value, keeping it true only risks future re-wipes
+if $FRESH; then
+    set_env "RECREATE_DB" "false"
+    ok "Reset RECREATE_DB=false (database won't be wiped on next restart)"
 fi
 
 # ─────────────────────────────────────────────────────────────
