@@ -295,15 +295,29 @@ if $SEED_DEMO; then
             break
         fi
     done
-    sed -i "s|^SEED_USER_PASSWORD=.*|SEED_USER_PASSWORD=${SEED_PASSWORD}|" .env
+    if grep -q "^SEED_USER_PASSWORD=" .env 2>/dev/null; then
+        sed -i "s|^SEED_USER_PASSWORD=.*|SEED_USER_PASSWORD=${SEED_PASSWORD}|" .env
+    else
+        echo "SEED_USER_PASSWORD=${SEED_PASSWORD}" >> .env
+    fi
     ok "Seed user password set"
 fi
 
+# Helper: set or append a key=value in .env
+set_env() {
+    local key="$1" val="$2"
+    if grep -q "^${key}=" .env 2>/dev/null; then
+        sed -i "s|^${key}=.*|${key}=${val}|" .env
+    else
+        echo "${key}=${val}" >> .env
+    fi
+}
+
 # Apply --fresh and --seeded flags (works on both new and existing .env)
 if $FRESH; then
-    sed -i "s|^RECREATE_DB=.*|RECREATE_DB=true|" .env
+    set_env "RECREATE_DB" "true"
     if $SEED_DEMO; then
-        sed -i "s|^SEED_DEMO_DATA=.*|SEED_DEMO_DATA=true|" .env
+        set_env "SEED_DEMO_DATA" "true"
     fi
     warn "--fresh: database will be wiped and recreated on next start"
 fi
@@ -479,7 +493,7 @@ if $HEALTHY; then
 
     # Safety: reset RECREATE_DB so the database isn't wiped on every restart
     if $FRESH; then
-        sed -i "s|^RECREATE_DB=true|RECREATE_DB=false|" .env
+        set_env "RECREATE_DB" "false"
         ok "Reset RECREATE_DB=false (database has been wiped, won't repeat on next start)"
     fi
 else
