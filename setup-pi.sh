@@ -7,6 +7,8 @@
 #
 # Options:
 #   --seeded             Seed demo data (users, jobs, customers, etc.)
+#   --fresh              Wipe existing database and start over
+#   --fresh --seeded     Wipe database and reseed with demo data
 #   --include-signing    Also start DocuSeal e-signature service
 #   --no-ssl             Skip HTTPS setup (use plain HTTP on port 80)
 #
@@ -18,10 +20,12 @@ set -euo pipefail
 INCLUDE_SIGNING=false
 ENABLE_SSL=true
 SEED_DEMO=false
+FRESH=false
 
 for arg in "$@"; do
     case $arg in
         --seeded)          SEED_DEMO=true ;;
+        --fresh)           FRESH=true ;;
         --include-signing) INCLUDE_SIGNING=true ;;
         --no-ssl)          ENABLE_SSL=false ;;
         *) echo "Unknown option: $arg"; exit 1 ;;
@@ -266,6 +270,15 @@ else
     ok "Created .env with random JWT key and Pi network settings"
 fi
 
+# Apply --fresh and --seeded flags (works on both new and existing .env)
+if $FRESH; then
+    sed -i "s|^RECREATE_DB=.*|RECREATE_DB=true|" .env
+    if $SEED_DEMO; then
+        sed -i "s|^SEED_DEMO_DATA=.*|SEED_DEMO_DATA=true|" .env
+    fi
+    warn "--fresh: database will be wiped and recreated on next start"
+fi
+
 # ─────────────────────────────────────────────────────────────
 # 5. Write version.json
 # ─────────────────────────────────────────────────────────────
@@ -434,10 +447,20 @@ echo ""
 
 if $HEALTHY; then
     ok "API is healthy and accepting requests"
+
+    # Safety: reset RECREATE_DB so the database isn't wiped on every restart
+    if $FRESH; then
+        sed -i "s|^RECREATE_DB=true|RECREATE_DB=false|" .env
+        ok "Reset RECREATE_DB=false (database has been wiped, won't repeat on next start)"
+    fi
 else
     warn "API health check timed out after ${MAX_WAIT}s"
     warn "This can be normal on Pi — migrations are slow. Check:"
     warn "  docker compose logs -f qb-engineer-api"
+    if $FRESH; then
+        warn "IMPORTANT: RECREATE_DB is still 'true' in .env"
+        warn "Once the API is healthy, run:  sed -i 's/RECREATE_DB=true/RECREATE_DB=false/' .env"
+    fi
 fi
 
 # ─────────────────────────────────────────────────────────────
