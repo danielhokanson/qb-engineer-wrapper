@@ -2192,6 +2192,63 @@ namespace QBEngineer.Data.Migrations
                     b.ToTable("employee_profiles");
                 });
 
+            modelBuilder.Entity("QBEngineer.Core.Entities.EntityNote", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int?>("CreatedBy")
+                        .HasColumnType("integer")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<int>("EntityId")
+                        .HasColumnType("integer")
+                        .HasColumnName("entity_id");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("entity_type");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_entity_notes");
+
+                    b.HasIndex("CreatedBy")
+                        .HasDatabaseName("ix_entity_notes_created_by");
+
+                    b.HasIndex("EntityType", "EntityId")
+                        .HasDatabaseName("ix_entity_notes_entity_type_entity_id");
+
+                    b.ToTable("entity_notes", (string)null);
+                });
+
             modelBuilder.Entity("QBEngineer.Core.Entities.Expense", b =>
                 {
                     b.Property<int>("Id")
@@ -8165,6 +8222,15 @@ namespace QBEngineer.Data.Migrations
                         .HasConstraintName("fk_downtime_logs_assets_asset_id");
 
                     b.Navigation("Asset");
+                });
+
+            modelBuilder.Entity("QBEngineer.Core.Entities.EntityNote", b =>
+                {
+                    b.HasOne("QBEngineer.Data.Context.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedBy")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_entity_notes__asp_net_users_created_by");
                 });
 
             modelBuilder.Entity("QBEngineer.Core.Entities.Expense", b =>
