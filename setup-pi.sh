@@ -270,6 +270,35 @@ else
     ok "Created .env with random JWT key and Pi network settings"
 fi
 
+# Prompt for seed user password when seeding demo data
+if $SEED_DEMO; then
+    step "Demo data user password"
+    echo ""
+    echo "    Demo data includes 9 test users (admin@qbengineer.local, etc.)"
+    echo "    You must set a temporary password for these accounts."
+    echo "    Requirements: 8+ chars, uppercase, lowercase, digit, special char"
+    echo ""
+    while true; do
+        read -rsp "    Enter password for demo users: " SEED_PASSWORD
+        echo ""
+        if [[ ${#SEED_PASSWORD} -lt 8 ]]; then
+            warn "Password must be at least 8 characters"
+        elif [[ ! "$SEED_PASSWORD" =~ [A-Z] ]]; then
+            warn "Password must contain an uppercase letter"
+        elif [[ ! "$SEED_PASSWORD" =~ [a-z] ]]; then
+            warn "Password must contain a lowercase letter"
+        elif [[ ! "$SEED_PASSWORD" =~ [0-9] ]]; then
+            warn "Password must contain a digit"
+        elif [[ ! "$SEED_PASSWORD" =~ [^A-Za-z0-9] ]]; then
+            warn "Password must contain a special character"
+        else
+            break
+        fi
+    done
+    sed -i "s|^SEED_USER_PASSWORD=.*|SEED_USER_PASSWORD=${SEED_PASSWORD}|" .env
+    ok "Seed user password set"
+fi
+
 # Apply --fresh and --seeded flags (works on both new and existing .env)
 if $FRESH; then
     sed -i "s|^RECREATE_DB=.*|RECREATE_DB=true|" .env
