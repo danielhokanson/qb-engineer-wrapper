@@ -6,6 +6,7 @@
 #   ./setup-pi.sh
 #
 # Options:
+#   --seeded             Seed demo data (users, jobs, customers, etc.)
 #   --include-signing    Also start DocuSeal e-signature service
 #   --no-ssl             Skip HTTPS setup (use plain HTTP on port 80)
 #
@@ -16,9 +17,11 @@ set -euo pipefail
 
 INCLUDE_SIGNING=false
 ENABLE_SSL=true
+SEED_DEMO=false
 
 for arg in "$@"; do
     case $arg in
+        --seeded)          SEED_DEMO=true ;;
         --include-signing) INCLUDE_SIGNING=true ;;
         --no-ssl)          ENABLE_SSL=false ;;
         *) echo "Unknown option: $arg"; exit 1 ;;
@@ -249,8 +252,16 @@ else
     fi
 
     # Production-ish settings
-    sed -i "s|^RECREATE_DB=true|RECREATE_DB=true|" .env
     sed -i "s|^MOCK_INTEGRATIONS=true|MOCK_INTEGRATIONS=false|" .env
+
+    # Demo data — only seeded with --seeded flag
+    if $SEED_DEMO; then
+        sed -i "s|^SEED_DEMO_DATA=true|SEED_DEMO_DATA=true|" .env
+        ok "Demo data will be seeded (users, jobs, customers, etc.)"
+    else
+        sed -i "s|^SEED_DEMO_DATA=true|SEED_DEMO_DATA=false|" .env
+        ok "Clean install — no demo data (setup wizard creates your admin account)"
+    fi
 
     ok "Created .env with random JWT key and Pi network settings"
 fi
