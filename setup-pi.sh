@@ -231,7 +231,7 @@ else
     cp .env.example .env
 
     # Generate random JWT key
-    JWT_KEY=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48)
+    JWT_KEY=$(head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 48 || true)
     sed -i "s|JWT_KEY=dev-secret-key-change-in-production-min-32-chars!!|JWT_KEY=${JWT_KEY}|" .env
 
     # Detect the Pi's local IP for CORS and frontend base URL
