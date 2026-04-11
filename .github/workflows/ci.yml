@@ -14,10 +14,10 @@ jobs:
       run:
         working-directory: qb-engineer-ui
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: qb-engineer-ui/package-lock.json
       - run: npm ci
@@ -30,8 +30,8 @@ jobs:
       run:
         working-directory: qb-engineer-server
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 9.0.x
       - run: dotnet restore qb-engineer.api/qb-engineer.api.csproj
@@ -45,10 +45,10 @@ jobs:
       run:
         working-directory: qb-engineer-ui
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: qb-engineer-ui/package-lock.json
       - run: npm ci
@@ -62,8 +62,8 @@ jobs:
       run:
         working-directory: qb-engineer-server
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 9.0.x
       - run: dotnet restore
@@ -75,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build UI image
         run: docker build -t qb-engineer-ui:${{ github.sha }} ./qb-engineer-ui
       - name: Build API image
