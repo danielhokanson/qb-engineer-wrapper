@@ -1,33 +1,44 @@
 #!/usr/bin/env bash
-# setup-pi.sh — First-time setup for QB Engineer on Raspberry Pi
+# setup.sh — First-time setup for QB Engineer (Linux / macOS)
+#
+# Bash equivalent of setup.ps1 for users who prefer a native shell.
+# Auto-detects platform, architecture, and available resources.
+# Applies memory tuning on low-RAM systems, offers SSL on headless/server installs.
 #
 # Run from the repo root after cloning:
-#   chmod +x setup-pi.sh
-#   ./setup-pi.sh
+#   chmod +x setup.sh
+#   ./setup.sh
 #
 # Options:
 #   --seeded             Seed demo data (users, jobs, customers, etc.)
 #   --fresh              Wipe existing database and start over
 #   --fresh --seeded     Wipe database and reseed with demo data
+#   --include-ai         Also start Ollama AI assistant
+#   --include-tts        Also start Coqui TTS for training video narration
 #   --include-signing    Also start DocuSeal e-signature service
-#   --no-ssl             Skip HTTPS setup (use plain HTTP on port 80)
-#
-# NOTE: AI (Ollama) and TTS (Coqui) profiles are not recommended on
-# Raspberry Pi due to memory and CPU constraints.
+#   --include-all        All optional profiles
+#   --ssl                Generate self-signed SSL cert and serve on 443
+#   --no-ssl             Skip SSL even if auto-detected as headless
 
 set -euo pipefail
 
-INCLUDE_SIGNING=false
-ENABLE_SSL=true
 SEED_DEMO=false
 FRESH=false
+INCLUDE_AI=false
+INCLUDE_TTS=false
+INCLUDE_SIGNING=false
+SSL_FLAG=""  # "" = auto-detect, "force" = --ssl, "skip" = --no-ssl
 
 for arg in "$@"; do
     case $arg in
         --seeded)          SEED_DEMO=true ;;
         --fresh)           FRESH=true ;;
+        --include-ai)      INCLUDE_AI=true ;;
+        --include-tts)     INCLUDE_TTS=true ;;
         --include-signing) INCLUDE_SIGNING=true ;;
-        --no-ssl)          ENABLE_SSL=false ;;
+        --include-all)     INCLUDE_AI=true; INCLUDE_TTS=true; INCLUDE_SIGNING=true ;;
+        --ssl)             SSL_FLAG="force" ;;
+        --no-ssl)          SSL_FLAG="skip" ;;
         *) echo "Unknown option: $arg"; exit 1 ;;
     esac
 done
@@ -52,10 +63,69 @@ bail() {
     done
     echo ""
     info "After installing, close this terminal and re-run:"
-    info "  ./setup-pi.sh"
+    info "  ./setup.sh"
     echo ""
     exit 1
 }
+
+# Helper: set or append a key=value in .env
+set_env() {
+    local key="$1" val="$2"
+    if grep -q "^${key}=" .env 2>/dev/null; then
+        sed -i "s|^${key}=.*|${key}=${val}|" .env
+    else
+        echo "${key}=${val}" >> .env
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────
+# Platform detection
+# ─────────────────────────────────────────────────────────────
+
+IS_MAC=false
+IS_LINUX=false
+IS_ARM=false
+IS_LOW_RAM=false
+IS_HEADLESS=false
+TOTAL_MEM_MB=0
+
+if [[ "$(uname)" == "Darwin" ]]; then
+    IS_MAC=true
+else
+    IS_LINUX=true
+fi
+
+ARCH=$(uname -m)
+if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
+    IS_ARM=true
+fi
+
+# Detect available RAM
+if $IS_MAC; then
+    TOTAL_MEM_MB=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 / 1024 ))
+elif [[ -f /proc/meminfo ]]; then
+    TOTAL_MEM_MB=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)
+fi
+
+if (( TOTAL_MEM_MB > 0 && TOTAL_MEM_MB < 7500 )); then
+    IS_LOW_RAM=true
+fi
+
+# Detect headless (no display server)
+if $IS_LINUX && [[ -z "${DISPLAY:-}" ]] && [[ -z "${WAYLAND_DISPLAY:-}" ]]; then
+    IS_HEADLESS=true
+fi
+
+# Resolve SSL mode
+ENABLE_SSL=false
+if [[ "$SSL_FLAG" == "force" ]]; then
+    ENABLE_SSL=true
+elif [[ "$SSL_FLAG" == "skip" ]]; then
+    ENABLE_SSL=false
+elif $IS_HEADLESS; then
+    # Auto-enable SSL for headless servers (accessed over network)
+    ENABLE_SSL=true
+fi
 
 # ─────────────────────────────────────────────────────────────
 # Banner
@@ -63,36 +133,40 @@ bail() {
 
 echo ""
 echo "  ╔══════════════════════════════════════════════╗"
-echo "  ║   QB Engineer — Raspberry Pi First-Time Setup║"
+echo "  ║        QB Engineer — First-Time Setup        ║"
 echo "  ╚══════════════════════════════════════════════╝"
 echo ""
 
 # ─────────────────────────────────────────────────────────────
-# 1. Architecture check
+# 1. System check
 # ─────────────────────────────────────────────────────────────
 
 step "Checking system"
 
-ARCH=$(uname -m)
-if [[ "$ARCH" != "aarch64" && "$ARCH" != "arm64" ]]; then
-    warn "Detected architecture: $ARCH"
-    warn "This script is designed for 64-bit ARM (Raspberry Pi OS 64-bit)."
-    warn "32-bit Raspberry Pi OS is NOT supported (.NET 9 requires 64-bit)."
-    read -rp "    Continue anyway? (y/N) " yn
-    [[ "$yn" =~ ^[Yy]$ ]] || exit 1
-else
-    ok "Architecture: $ARCH (64-bit ARM)"
+ok "Platform: $(uname -s) ($ARCH)"
+
+if $IS_ARM; then
+    # Warn on 32-bit ARM (unsupported by .NET 9)
+    if [[ "$ARCH" != "aarch64" && "$ARCH" != "arm64" ]]; then
+        warn "32-bit ARM detected — .NET 9 requires 64-bit. This may not work."
+    else
+        ok "Architecture: 64-bit ARM"
+    fi
 fi
 
-TOTAL_MEM_MB=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)
-if (( TOTAL_MEM_MB < 3500 )); then
-    warn "Only ${TOTAL_MEM_MB} MB RAM detected. Minimum recommended: 4 GB."
-    warn "The stack may run but could be slow or OOM-kill containers."
-elif (( TOTAL_MEM_MB < 7500 )); then
-    ok "${TOTAL_MEM_MB} MB RAM (4 GB Pi — core stack will work, skip AI profile)"
-else
-    ok "${TOTAL_MEM_MB} MB RAM"
+if (( TOTAL_MEM_MB > 0 )); then
+    if (( TOTAL_MEM_MB < 3500 )); then
+        warn "Only ${TOTAL_MEM_MB} MB RAM. Minimum recommended: 4 GB."
+        warn "The stack may run but could be slow or OOM-kill containers."
+    elif $IS_LOW_RAM; then
+        ok "${TOTAL_MEM_MB} MB RAM (memory tuning will be applied)"
+    else
+        ok "${TOTAL_MEM_MB} MB RAM"
+    fi
 fi
+
+$IS_HEADLESS && ok "Headless server detected"
+$ENABLE_SSL  && ok "SSL will be configured"
 
 # ─────────────────────────────────────────────────────────────
 # 2. Prerequisites
@@ -102,25 +176,42 @@ step "Checking prerequisites"
 
 # --- Git ---
 if ! command -v git &>/dev/null; then
-    bail "Git" \
-        "Install Git:" \
-        "  sudo apt update && sudo apt install -y git"
+    if $IS_MAC; then
+        bail "Git" \
+            "Install via Homebrew:  brew install git" \
+            "Or install Xcode CLI:  xcode-select --install"
+    else
+        bail "Git" \
+            "Install via your package manager:" \
+            "  Ubuntu/Debian:  sudo apt install git" \
+            "  Fedora/RHEL:    sudo dnf install git" \
+            "  Arch:           sudo pacman -S git"
+    fi
 fi
 ok "Git $(git --version 2>/dev/null)"
 
 # --- Docker ---
 if ! command -v docker &>/dev/null; then
-    bail "Docker" \
-        "Install Docker on Raspberry Pi:" \
-        "  curl -fsSL https://get.docker.com | sudo sh" \
-        "" \
-        "Then add your user to the docker group:" \
-        "  sudo usermod -aG docker \$USER" \
-        "" \
-        "Log out and back in for the group change to take effect."
+    if $IS_MAC; then
+        bail "Docker" \
+            "Download Docker Desktop from: https://www.docker.com/products/docker-desktop/" \
+            "Or install via Homebrew:  brew install --cask docker" \
+            "Then launch Docker Desktop and wait for it to finish starting."
+    else
+        bail "Docker" \
+            "Install Docker Engine:" \
+            "  https://docs.docker.com/engine/install/" \
+            "" \
+            "Quick install (Ubuntu/Debian):" \
+            "  curl -fsSL https://get.docker.com | sudo sh" \
+            "" \
+            "Then add your user to the docker group:" \
+            "  sudo usermod -aG docker \$USER" \
+            "  Log out and back in for this to take effect."
+    fi
 fi
 
-# --- Docker permissions ---
+# --- Docker daemon ---
 if ! docker info &>/dev/null 2>&1; then
     if docker info 2>&1 | grep -qi "permission denied"; then
         bail "Docker (permissions)" \
@@ -131,14 +222,20 @@ if ! docker info &>/dev/null 2>&1; then
             "" \
             "Then log out and back in (or run: newgrp docker)."
     else
-        bail "Docker (daemon)" \
-            "Docker is installed but the daemon is not running." \
-            "" \
-            "Start it:" \
-            "  sudo systemctl start docker" \
-            "" \
-            "Enable on boot:" \
-            "  sudo systemctl enable docker"
+        if $IS_MAC; then
+            bail "Docker (daemon)" \
+                "Docker is installed but not running." \
+                "Open Docker Desktop and wait for it to show 'Docker Desktop is running'."
+        else
+            bail "Docker (daemon)" \
+                "Docker is installed but the daemon is not running." \
+                "" \
+                "Start it:" \
+                "  sudo systemctl start docker" \
+                "" \
+                "Enable on boot:" \
+                "  sudo systemctl enable docker"
+        fi
     fi
 fi
 ok "Docker $(docker --version 2>/dev/null)"
@@ -148,31 +245,42 @@ if ! docker compose version &>/dev/null 2>&1; then
     bail "Docker Compose" \
         "Docker Compose v2 is required." \
         "" \
-        "Install the compose plugin:" \
-        "  sudo apt update && sudo apt install -y docker-compose-plugin" \
+        "Docker Desktop includes Compose v2 by default." \
+        "On Linux, install the compose plugin:" \
+        "  sudo apt install docker-compose-plugin" \
         "" \
         "Verify: docker compose version"
 fi
 ok "$(docker compose version 2>/dev/null)"
 
 # --- Disk space ---
-FREE_GB=$(df --output=avail -BG . 2>/dev/null | tail -1 | tr -dc '0-9')
-if (( FREE_GB < 10 )); then
-    warn "Only ${FREE_GB} GB free. Recommended: 20+ GB."
-    warn "Consider using a USB SSD instead of the SD card for Docker storage."
+if $IS_MAC; then
+    FREE_GB=$(df -g . 2>/dev/null | tail -1 | awk '{print $4}')
 else
+    FREE_GB=$(df --output=avail -BG . 2>/dev/null | tail -1 | tr -dc '0-9')
+fi
+if [[ -n "${FREE_GB:-}" ]] && (( FREE_GB < 10 )); then
+    warn "Only ${FREE_GB} GB free. Recommended: 20+ GB."
+    $IS_ARM && warn "Consider using a USB SSD instead of the SD card for Docker storage."
+elif [[ -n "${FREE_GB:-}" ]]; then
     ok "${FREE_GB} GB free disk space"
 fi
 
 # --- Port check ---
 CONFLICTS=""
-CHECK_PORTS="80 5000 5432 9000 9001"
+CHECK_PORTS="4200 5000 5432 9000 9001"
 if $ENABLE_SSL; then
     CHECK_PORTS="80 443 5000 5432 9000 9001"
 fi
 for PORT in $CHECK_PORTS; do
-    if ss -tlnp 2>/dev/null | grep -q ":${PORT} " 2>/dev/null; then
-        CONFLICTS="$CONFLICTS $PORT"
+    if $IS_MAC; then
+        if lsof -iTCP:"$PORT" -sTCP:LISTEN &>/dev/null 2>&1; then
+            CONFLICTS="$CONFLICTS $PORT"
+        fi
+    else
+        if ss -tlnp 2>/dev/null | grep -q ":${PORT} " 2>/dev/null; then
+            CONFLICTS="$CONFLICTS $PORT"
+        fi
     fi
 done
 if [[ -n "$CONFLICTS" ]]; then
@@ -184,13 +292,15 @@ else
     ok "Required ports are available ($CHECK_PORTS)"
 fi
 
-# --- openssl (for self-signed cert) ---
+# --- openssl (only needed if SSL enabled) ---
 if $ENABLE_SSL && ! command -v openssl &>/dev/null; then
     bail "openssl" \
         "openssl is required to generate the self-signed SSL certificate." \
         "" \
         "Install it:" \
-        "  sudo apt update && sudo apt install -y openssl"
+        "  Ubuntu/Debian:  sudo apt install openssl" \
+        "  Fedora/RHEL:    sudo dnf install openssl" \
+        "  macOS:          brew install openssl"
 fi
 
 echo ""
@@ -205,7 +315,7 @@ step "Verifying project files"
 if [[ ! -f "docker-compose.yml" ]]; then
     fail "docker-compose.yml not found."
     info "Run this script from the repo root:"
-    info "  cd qb-engineer-wrapper && ./setup-pi.sh"
+    info "  cd qb-engineer-wrapper && ./setup.sh"
     exit 1
 fi
 
@@ -226,7 +336,7 @@ step "Configuring environment"
 
 if [[ -f ".env" ]]; then
     ok ".env already exists — skipping creation"
-    warn "To regenerate, delete .env and re-run setup-pi.sh"
+    warn "To regenerate, delete .env and re-run setup.sh"
 else
     cp .env.example .env
 
@@ -234,29 +344,30 @@ else
     JWT_KEY=$(head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 48 || true)
     sed -i "s|JWT_KEY=dev-secret-key-change-in-production-min-32-chars!!|JWT_KEY=${JWT_KEY}|" .env
 
-    # Detect the Pi's local IP for CORS and frontend base URL
-    PI_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    # For headless/server installs, configure network access
+    if $IS_HEADLESS || $ENABLE_SSL; then
+        HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 
-    if $ENABLE_SSL; then
-        SCHEME="https"
-        sed -i "s|^UI_PORT=4200|UI_PORT=443|" .env
-        # Also expose port 80 for redirect — handled in compose overlay
-    else
-        SCHEME="http"
-        sed -i "s|^UI_PORT=4200|UI_PORT=80|" .env
+        if $ENABLE_SSL; then
+            SCHEME="https"
+            sed -i "s|^UI_PORT=4200|UI_PORT=443|" .env
+        else
+            SCHEME="http"
+            sed -i "s|^UI_PORT=4200|UI_PORT=80|" .env
+        fi
+
+        if [[ -n "${HOST_IP:-}" ]]; then
+            sed -i "s|^FRONTEND_BASE_URL=http://localhost:4200|FRONTEND_BASE_URL=${SCHEME}://${HOST_IP}|" .env
+            sed -i "s|^CORS_ORIGINS=http://localhost:4200|CORS_ORIGINS=${SCHEME}://${HOST_IP},${SCHEME}://localhost,http://${HOST_IP},http://localhost|" .env
+            sed -i "s|^MINIO_PUBLIC_ENDPOINT=localhost:9000|MINIO_PUBLIC_ENDPOINT=${HOST_IP}:9000|" .env
+            ok "Detected host IP: $HOST_IP"
+        else
+            warn "Could not detect IP — you may need to edit CORS_ORIGINS in .env"
+        fi
+
+        # Server installs default to production-ish settings
+        sed -i "s|^MOCK_INTEGRATIONS=true|MOCK_INTEGRATIONS=false|" .env
     fi
-
-    if [[ -n "$PI_IP" ]]; then
-        sed -i "s|^FRONTEND_BASE_URL=http://localhost:4200|FRONTEND_BASE_URL=${SCHEME}://${PI_IP}|" .env
-        sed -i "s|^CORS_ORIGINS=http://localhost:4200|CORS_ORIGINS=${SCHEME}://${PI_IP},${SCHEME}://localhost,http://${PI_IP},http://localhost|" .env
-        sed -i "s|^MINIO_PUBLIC_ENDPOINT=localhost:9000|MINIO_PUBLIC_ENDPOINT=${PI_IP}:9000|" .env
-        ok "Detected Pi IP: $PI_IP"
-    else
-        warn "Could not detect IP — you may need to edit CORS_ORIGINS in .env"
-    fi
-
-    # Production-ish settings
-    sed -i "s|^MOCK_INTEGRATIONS=true|MOCK_INTEGRATIONS=false|" .env
 
     # Demo data — only seeded with --seeded flag
     if $SEED_DEMO; then
@@ -267,7 +378,7 @@ else
         ok "Clean install — no demo data (setup wizard creates your admin account)"
     fi
 
-    ok "Created .env with random JWT key and Pi network settings"
+    ok "Created .env with random JWT key"
 fi
 
 # Prompt for seed user password when seeding demo data
@@ -295,23 +406,9 @@ if $SEED_DEMO; then
             break
         fi
     done
-    if grep -q "^SEED_USER_PASSWORD=" .env 2>/dev/null; then
-        sed -i "s|^SEED_USER_PASSWORD=.*|SEED_USER_PASSWORD=${SEED_PASSWORD}|" .env
-    else
-        echo "SEED_USER_PASSWORD=${SEED_PASSWORD}" >> .env
-    fi
+    set_env "SEED_USER_PASSWORD" "$SEED_PASSWORD"
     ok "Seed user password set"
 fi
-
-# Helper: set or append a key=value in .env
-set_env() {
-    local key="$1" val="$2"
-    if grep -q "^${key}=" .env 2>/dev/null; then
-        sed -i "s|^${key}=.*|${key}=${val}|" .env
-    else
-        echo "${key}=${val}" >> .env
-    fi
-}
 
 # Apply --fresh and --seeded flags (works on both new and existing .env)
 if $FRESH; then
@@ -341,39 +438,57 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────
-# 6. Reduce memory limits for Pi
+# 6. Resource tuning (low-RAM / SSL)
 # ─────────────────────────────────────────────────────────────
 
-step "Applying Raspberry Pi tuning"
+NEEDS_OVERRIDE=false
 
-# ── Generate self-signed SSL certificate ──
+# ── SSL certificate ──
 if $ENABLE_SSL; then
+    step "Configuring SSL"
     CERT_DIR="./certs"
     if [[ -f "${CERT_DIR}/selfsigned.crt" && -f "${CERT_DIR}/selfsigned.key" ]]; then
         ok "SSL certificate already exists in ${CERT_DIR}/"
     else
         mkdir -p "$CERT_DIR"
-        PI_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-        # Generate cert valid for 10 years, covering IP + localhost
+        HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
         openssl req -x509 -nodes -days 3650 \
             -newkey rsa:2048 \
             -keyout "${CERT_DIR}/selfsigned.key" \
             -out "${CERT_DIR}/selfsigned.crt" \
             -subj "/CN=qb-engineer" \
-            -addext "subjectAltName=IP:${PI_IP:-127.0.0.1},IP:127.0.0.1,DNS:localhost" \
+            -addext "subjectAltName=IP:${HOST_IP:-127.0.0.1},IP:127.0.0.1,DNS:localhost" \
             2>/dev/null
         ok "Generated self-signed SSL certificate (valid 10 years)"
-        ok "  Cert: ${CERT_DIR}/selfsigned.crt"
-        ok "  Key:  ${CERT_DIR}/selfsigned.key"
+    fi
+    NEEDS_OVERRIDE=true
+fi
+
+# ── Memory tuning ──
+if $IS_LOW_RAM; then
+    step "Applying memory tuning"
+    ok "Low-RAM detected (${TOTAL_MEM_MB} MB) — applying container memory limits"
+    ok "API: 1 GB, DB: 512 MB"
+    NEEDS_OVERRIDE=true
+
+    # Warn against heavy profiles
+    if $INCLUDE_AI; then
+        warn "AI profile enabled on a low-RAM system — Ollama needs ~4 GB RAM"
+        warn "Consider disabling AI (remove --include-ai) if you experience OOM issues"
     fi
 fi
 
-# ── Create Pi-specific compose override ──
-if $ENABLE_SSL; then
-cat > docker-compose.pi.yml <<'PIOVERRIDE'
-# Raspberry Pi overrides — auto-generated by setup-pi.sh
-# Memory tuning + HTTPS via self-signed certificate.
-services:
+# ── Generate compose override if needed ──
+if $NEEDS_OVERRIDE; then
+    step "Generating docker-compose.override.yml"
+
+    {
+        echo "# Auto-generated by setup.sh — resource tuning + SSL"
+        echo "services:"
+
+        # SSL: UI ports + cert volume
+        if $ENABLE_SSL; then
+            cat <<'SSLBLOCK'
   qb-engineer-ui:
     ports:
       - "443:443"
@@ -381,6 +496,12 @@ services:
     volumes:
       - ./certs:/etc/nginx/certs:ro
       - ./qb-engineer-ui/nginx-ssl.conf:/etc/nginx/conf.d/default.conf:ro
+SSLBLOCK
+        fi
+
+        # Memory limits for low-RAM systems
+        if $IS_LOW_RAM; then
+            cat <<'MEMBLOCK'
   qb-engineer-api:
     deploy:
       resources:
@@ -398,41 +519,12 @@ services:
         -c work_mem=4MB
         -c maintenance_work_mem=64MB
         -c max_connections=50
-PIOVERRIDE
-ok "Created docker-compose.pi.yml (SSL + reduced memory limits)"
-else
-cat > docker-compose.pi.yml <<'PIOVERRIDE'
-# Raspberry Pi overrides — auto-generated by setup-pi.sh
-# Memory tuning only (no SSL).
-services:
-  qb-engineer-api:
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-  qb-engineer-db:
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-    command: >
-      postgres
-        -c shared_buffers=128MB
-        -c effective_cache_size=256MB
-        -c work_mem=4MB
-        -c maintenance_work_mem=64MB
-        -c max_connections=50
-PIOVERRIDE
-ok "Created docker-compose.pi.yml (reduced memory limits)"
-fi
+MEMBLOCK
+        fi
+    } > docker-compose.override.yml
 
-ok "API: 1 GB, DB: 512 MB, UI: 256 MB"
-
-# Set COMPOSE_FILE so docker compose always picks up the Pi overlay
-if grep -q "^COMPOSE_FILE=" .env 2>/dev/null; then
-    sed -i "s|^COMPOSE_FILE=.*|COMPOSE_FILE=docker-compose.yml:docker-compose.pi.yml|" .env
-else
-    echo "COMPOSE_FILE=docker-compose.yml:docker-compose.pi.yml" >> .env
+    ok "Created docker-compose.override.yml"
+    # docker-compose.override.yml is auto-loaded by docker compose — no COMPOSE_FILE needed
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -440,7 +532,11 @@ fi
 # ─────────────────────────────────────────────────────────────
 
 step "Building Docker images"
-warn "First build on Raspberry Pi takes 10-20 minutes — go grab a coffee"
+if $IS_ARM; then
+    warn "First build on ARM can take 10-20 minutes — go grab a coffee"
+else
+    info "This may take several minutes on first run"
+fi
 echo ""
 
 echo "    Building API image..."
@@ -453,12 +549,26 @@ ok "UI image built"
 
 step "Starting core services (db, storage, backup, api, ui)"
 
-docker compose up -d \
+docker compose up -d --remove-orphans \
     qb-engineer-db \
     qb-engineer-storage \
     qb-engineer-backup \
     qb-engineer-api \
     qb-engineer-ui
+
+# --- Optional: AI ---
+if $INCLUDE_AI; then
+    step "Starting AI service (Ollama)"
+    warn "First run downloads AI models (~4 GB) — this can take several minutes"
+    docker compose --profile ai up -d qb-engineer-ai qb-engineer-ai-init
+fi
+
+# --- Optional: TTS ---
+if $INCLUDE_TTS; then
+    step "Starting TTS service (Coqui)"
+    warn "First run downloads the VCTK voice model (~500 MB)"
+    docker compose --profile tts up -d qb-engineer-tts
+fi
 
 # --- Optional: Signing ---
 if $INCLUDE_SIGNING; then
@@ -470,9 +580,15 @@ fi
 # 8. Wait for API health
 # ─────────────────────────────────────────────────────────────
 
-step "Waiting for API to become healthy (first start runs database migrations)"
+step "Waiting for API to become healthy (first start includes database migration)"
 
-MAX_WAIT=180
+# Longer timeout for ARM / low-RAM systems
+if $IS_ARM || $IS_LOW_RAM; then
+    MAX_WAIT=180
+else
+    MAX_WAIT=120
+fi
+
 ELAPSED=0
 HEALTHY=false
 
@@ -492,12 +608,11 @@ if $HEALTHY; then
     ok "API is healthy and accepting requests"
 else
     warn "API health check timed out after ${MAX_WAIT}s"
-    warn "This can be normal on Pi — migrations are slow. Check:"
-    warn "  docker compose logs -f qb-engineer-api"
+    warn "This is normal on first start while migrations run."
+    warn "Check progress: docker compose logs -f qb-engineer-api"
 fi
 
-# Safety: always reset RECREATE_DB after the container has started —
-# it already read the value, keeping it true only risks future re-wipes
+# Reset RECREATE_DB so next restart doesn't wipe again
 if $FRESH; then
     set_env "RECREATE_DB" "false"
     ok "Reset RECREATE_DB=false (database won't be wiped on next restart)"
@@ -510,14 +625,14 @@ fi
 step "Container status"
 docker compose ps
 
-PI_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
 
 if $ENABLE_SSL; then
     SCHEME="https"
-    EXT_PORT="443"
+    UI_URL="${SCHEME}://localhost"
 else
     SCHEME="http"
-    EXT_PORT="80"
+    UI_URL="http://localhost:4200"
 fi
 
 echo ""
@@ -525,11 +640,11 @@ echo "  ╔═══════════════════════
 printf "  ║          \033[32mSetup complete!\033[0m                     ║\n"
 echo "  ╚══════════════════════════════════════════════╝"
 echo ""
-echo "  ─── Access ───"
+echo "  Open in your browser:"
 echo ""
-echo "    Local:   ${SCHEME}://localhost"
-if [[ -n "$PI_IP" ]]; then
-echo "    Network: ${SCHEME}://${PI_IP}"
+echo "    $UI_URL"
+if [[ -n "${HOST_IP:-}" ]]; then
+echo "    ${SCHEME}://${HOST_IP}  (network access)"
 fi
 if $ENABLE_SSL; then
 echo ""
@@ -541,37 +656,50 @@ echo ""
 echo "  A setup wizard will guide you through creating"
 echo "  your admin account and company profile."
 echo ""
-echo "  ─── Public Access ───"
+echo "  ─── Service URLs ───"
 echo ""
-echo "  To make this accessible from the internet:"
+echo "  API:          http://localhost:5000"
+echo "  API Health:   http://localhost:5000/api/v1/health"
+echo "  MinIO:        http://localhost:9001  (minioadmin / minioadmin)"
+$INCLUDE_AI      && echo "  Ollama:       http://localhost:11434"
+$INCLUDE_TTS     && echo "  Coqui TTS:    http://localhost:5002"
+$INCLUDE_SIGNING && echo "  DocuSeal:     http://localhost:3000"
 echo ""
-echo "    1. Log into your router (usually http://192.168.1.1)"
-echo "    2. Find 'Port Forwarding' (may be under Advanced or NAT)"
-echo "    3. Forward external port ${EXT_PORT} → ${PI_IP:-<Pi IP>} port ${EXT_PORT}"
-if $ENABLE_SSL; then
-echo "    4. Also forward external port 80 → ${PI_IP:-<Pi IP>} port 80 (auto-redirects to HTTPS)"
-echo "    5. Find your public IP: curl -4 ifconfig.me"
-echo "    6. Share: ${SCHEME}://<your-public-ip>"
-else
-echo "    4. Find your public IP: curl -4 ifconfig.me"
-echo "    5. Share: ${SCHEME}://<your-public-ip>"
+
+# Server access instructions (headless only)
+if $IS_HEADLESS && [[ -n "${HOST_IP:-}" ]]; then
+    EXT_PORT=$($ENABLE_SSL && echo "443" || echo "80")
+    echo "  ─── Public Access ───"
+    echo ""
+    echo "  To make this accessible from the internet:"
+    echo ""
+    echo "    1. Log into your router (usually http://192.168.1.1)"
+    echo "    2. Find 'Port Forwarding' (may be under Advanced or NAT)"
+    echo "    3. Forward external port ${EXT_PORT} → ${HOST_IP} port ${EXT_PORT}"
+    if $ENABLE_SSL; then
+    echo "    4. Also forward external port 80 → ${HOST_IP} port 80 (auto-redirects to HTTPS)"
+    echo "    5. Find your public IP: curl -4 ifconfig.me"
+    else
+    echo "    4. Find your public IP: curl -4 ifconfig.me"
+    fi
+    echo ""
 fi
-echo ""
-echo "  Update CORS_ORIGINS in .env if you add more access URLs:"
-echo "    CORS_ORIGINS=${SCHEME}://${PI_IP},${SCHEME}://<public-ip>"
-echo "    Then: docker compose up -d qb-engineer-api"
-echo ""
+
 echo "  ─── Useful Commands ───"
 echo ""
 echo "  View logs:    docker compose logs -f qb-engineer-api"
 echo "  Stop all:     docker compose stop"
 echo "  Start all:    docker compose up -d"
-echo "  Update:       git pull && docker compose up -d --build"
+echo "  Update:       ./refresh.sh"
 echo "  DB shell:     docker compose exec qb-engineer-db psql -U postgres -d qb_engineer"
 echo ""
-echo "  ─── Performance Tips ───"
-echo ""
-echo "  - Use a USB 3.0 SSD instead of the SD card for Docker storage"
-echo "  - Skip AI and TTS profiles on 4 GB Pi models"
-echo "  - The first page load after a restart is slow (JIT warmup)"
-echo ""
+
+# Performance tips for constrained systems
+if $IS_ARM || $IS_LOW_RAM; then
+    echo "  ─── Performance Tips ───"
+    echo ""
+    $IS_ARM && echo "  - Use a USB 3.0 SSD instead of the SD card for Docker storage"
+    $IS_LOW_RAM && echo "  - Skip AI and TTS profiles on devices with < 8 GB RAM"
+    echo "  - The first page load after a restart is slow (JIT warmup)"
+    echo ""
+fi
