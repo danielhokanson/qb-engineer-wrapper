@@ -1,0 +1,51 @@
+#!/bin/sh
+#
+# Pre-commit hook: runs Angular tests and .NET build before allowing commits.
+# Install: git config core.hooksPath .githooks
+#
+
+echo "🔍 Running pre-commit checks..."
+
+# ── Angular Tests (Vitest) ──────────────────────────────────────────
+echo ""
+echo "── Angular Tests ──"
+cd qb-engineer-ui
+
+# Only run if there are staged changes in the UI directory
+UI_CHANGES=$(git diff --cached --name-only -- ../qb-engineer-ui/ 2>/dev/null | head -1)
+if [ -n "$UI_CHANGES" ]; then
+  npx vitest run --reporter=default 2>&1
+  VITEST_EXIT=$?
+
+  if [ $VITEST_EXIT -ne 0 ]; then
+    echo ""
+    echo "❌ Angular tests failed. Fix the failing tests before committing."
+    exit 1
+  fi
+  echo "✅ Angular tests passed"
+else
+  echo "⏭  No UI changes staged, skipping Angular tests"
+fi
+
+cd ..
+
+# ── .NET Build ──────────────────────────────────────────────────────
+echo ""
+echo "── .NET Build ──"
+API_CHANGES=$(git diff --cached --name-only -- qb-engineer-server/ 2>/dev/null | head -1)
+if [ -n "$API_CHANGES" ]; then
+  dotnet build qb-engineer-server/qb-engineer.api/qb-engineer.api.csproj -c Release --nologo -v q 2>&1
+  DOTNET_EXIT=$?
+
+  if [ $DOTNET_EXIT -ne 0 ]; then
+    echo ""
+    echo "❌ .NET build failed. Fix build errors before committing."
+    exit 1
+  fi
+  echo "✅ .NET build passed"
+else
+  echo "⏭  No server changes staged, skipping .NET build"
+fi
+
+echo ""
+echo "✅ All pre-commit checks passed"
