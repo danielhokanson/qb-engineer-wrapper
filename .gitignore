@@ -64,6 +64,7 @@ nul
 /*.py
 /*.yaml
 /*.yml
+!/docker-compose.export.yml
 /*.pdf
 /*.txt
 /*.json
