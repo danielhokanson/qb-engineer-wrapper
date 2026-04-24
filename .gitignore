@@ -66,6 +66,7 @@ nul
 /*.yml
 !/docker-compose.export.yml
 !/docker-compose.demo.yml
+!/docker-compose.cohost.yml
 /*.pdf
 /*.txt
 /*.json
