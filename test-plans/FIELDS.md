@@ -34,9 +34,9 @@ Set in **Arc 2** unless noted.
 | Primary contact phone | Arc 2 | Arc 11b (Sam follow-up), Arc 22b (post-return call) | Sam can't reach customer; contact-interaction log shows no number |
 | Billing address | Arc 2 | Arc 18 (invoice header) | Invoice has no "Bill to" |
 | Shipping address (default ShipTo) | Arc 2 | Arc 17 (packing slip), shipping rate calc | Shipment can't compute rates; falls back to manual |
-| Tax-exempt? + exemption ID | 🚩 **not in Arc 2 currently** | Arc 18 (whether to add tax line) | Test invoice will always show tax — if a customer should be tax-exempt and there's no field to mark them, that's a gap. **Decision needed:** add as Arc 2 sub-step, or make Acme a non-exempt customer and accept tax on invoice. |
+| IsTaxExempt + TaxExemptionId | Arc 2 (toggle + cert # field) | Arc 18 (whether to add tax line) | Test invoice will always show tax — if Acme is supposed to be exempt and Arc 2 didn't toggle the box, audit gap. Fields added in `Add_TaxExempt_And_InvoiceCustomerPO` migration. |
 | Credit terms (e.g., Net 30) | Arc 2 | Arc 18 (invoice due-date computation), Arc 20 (overdue threshold) | Invoice has no due date; collections can't compute "X days late" |
-| Credit limit | 🚩 **not in Arc 2 currently** | Arc 5 (SO confirmation should warn if exceeds), Arc 20 (collections workflow) | If feature exists but isn't set, the warning never fires during testing. **Decision needed:** does qb-engineer's customer entity have a credit limit field? If yes, add to Arc 2. If no, note it as a missing feature. |
+| Credit limit | Arc 2 (set to high value, e.g. $1M, so it never triggers during the happy path) | Arc 5 (SO confirmation should warn if exceeds), Arc 20 (collections workflow) | If left null, the warning never fires during testing. Field already exists on Customer entity (verified). |
 | Notes / preferences (e.g., "no Saturday delivery") | Arc 2 (optional) | Arc 17 (shipping decisions) | Default behavior; not strictly a gap |
 | Customer status (Active/Inactive/Hold) | Arc 2 implicit "Active" | Arc 5 (SO creation should refuse if Hold) | Default Active is fine for happy path |
 
@@ -310,27 +310,38 @@ once here:
 
 ---
 
-## Open questions for the user
+## Open questions — RESOLVED
 
-These are 🚩 fields where I'd guess based on common sense, but should
-confirm against the actual entity definitions before writing arcs that
-depend on them:
+The 6 fields originally flagged as 🚩 have been audited against the
+actual entity definitions. Three already existed; three were missing
+and have been added as bug-fix commits. Status:
 
-1. **Customer.TaxExempt + exemption ID** — do these fields exist on
-   the Customer entity? If yes, add to Arc 2. If no, accept that all
-   test invoices will charge tax.
-2. **Customer.CreditLimit** — exists? If yes, set in Arc 2 to a value
-   that won't trigger during testing (e.g., $1M).
-3. **Part.ListPrice / Part.QuotePrice** — exists? Used to default the
-   quote line price in Arc 4. If no, Sam types from scratch.
-4. **Part.ReorderPoint + ReorderQty** — exists? Used in Arc 6a's
-   shortage detection. If no, Olivia eyeballs the inventory.
-5. **Time entry → Operation linking** — when Bob starts a timer, can
-   he pick which operation (Cut, Drill, etc.) he's about to do, or is
-   it just job-level? Affects Arc 9 detail.
-6. **Customer PO# on SO/Invoice** — field exists? Many B2B customers
-   require their PO# echoed on the invoice or they won't pay.
+| # | Field | Status | Resolution |
+|---|---|---|---|
+| 1 | `Customer.IsTaxExempt` + `TaxExemptionId` | ❌ was missing | **Added** to Customer entity + CustomerConfiguration + CreateCustomer/UpdateCustomer commands + CustomerDetailResponseModel. Migration: `Add_TaxExempt_And_InvoiceCustomerPO`. Validator requires the cert # when the toggle is on. |
+| 2 | `Customer.CreditLimit` | ✅ exists | Set in Arc 2 to a high value ($1M) so it doesn't trigger warnings during the happy-path test. |
+| 3 | `Part.ListPrice` / sales price | 🟡 by design | Pricing lives on `PriceList` entries per-customer, not on `Part`. **Not a bug.** Quote line in Arc 4 enters the price manually — that's the intended workflow when no PriceList exists for the customer. |
+| 4 | `Part.ReorderPoint` + `ReorderQuantity` | ✅ exists | Set in Arc 3 (Eddie sets reorder point on RAW-001). Drives shortage detection in Arc 6a. |
+| 5 | `TimeEntry.OperationId` | ✅ exists | Bob can link his timer to a specific operation in Arc 9. Whether the kiosk UI surfaces the operation picker is a separate validation point. |
+| 6 | `SalesOrder.CustomerPO` → `Invoice.CustomerPO` | 🟡 partial → ❌ → ✅ | `SalesOrder.CustomerPO` already existed; `Invoice.CustomerPO` did not. **Added** to Invoice entity + CreateInvoice command + InvoiceDetailResponseModel. CreateInvoice now auto-propagates from the linked SO when not explicitly set. |
 
-If any of these fields don't exist, that's a system-level gap — not
-just a test plan gap — and the test plan should highlight the
-absence as a finding rather than working around it.
+What this means for the arc writing:
+
+- Arc 2 should include the IsTaxExempt + TaxExemptionId + CreditLimit fields.
+- Arc 3 should include ReorderPoint + ReorderQuantity on RAW-001.
+- Arc 4 should include CustomerPO on the SO.
+- Arc 18 should verify CustomerPO appears on the generated invoice
+  (auto-propagated) AND that the tax line is suppressed if Acme is
+  marked exempt.
+- Arc 9 should include "pick the operation" as part of starting the
+  timer (and flag if the kiosk doesn't surface this).
+
+What's NOT yet wired up (UI surface):
+
+The fields exist server-side and round-trip through the API. The
+UI forms (customer create/edit dialog, invoice create/edit dialog)
+may not yet render the new fields. When the test plan arcs run and
+encounter "no checkbox for tax-exempt on the customer create form,"
+that's a real finding — log it as a 🟢 missing-UI gap. Fixing the
+backend is the prerequisite; surfacing in the UI follows naturally
+once arcs flag the gaps.
