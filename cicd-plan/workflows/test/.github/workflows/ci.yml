@@ -1,0 +1,35 @@
+# PR + push CI for qb-engineer-test
+#
+# This repo is markdown-only (manual test scripts for human testers).
+# CI = lint the markdown so links don't rot, formatting stays clean.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint markdown
+        uses: DavidAnson/markdownlint-cli2-action@v17
+        with:
+          globs: '**/*.md'
+
+      - name: Check links (markdown-link-check)
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: 'yes'
+          use-verbose-mode: 'yes'
+          config-file: '.markdown-link-check.json'
